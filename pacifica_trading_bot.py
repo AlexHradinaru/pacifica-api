@@ -308,45 +308,34 @@ class PacificaRandomTradingBot:
             return False, None
 
     def _calculate_percentage_position_size(self, symbol: str, price: float) -> float:
-        """Calculate position size based on account percentage - ADJUSTED FOR PACIFICA'S ACTUAL LEVERAGE"""
+        """Calculate position size based on account percentage - FIXED TO MATCH LIGHTER LOGIC"""
         # Random percentage between min and max
         risk_percent = random.uniform(MIN_POSITION_PERCENT, MAX_POSITION_PERCENT)
         
         # Calculate risk amount in dollars
         risk_amount = (risk_percent / 100) * ACCOUNT_BALANCE
         
-        # CRITICAL: Pacifica uses 50x leverage by default, not our configured leverage
-        # We need to adjust our position size calculation accordingly
-        configured_leverage = MANUAL_LEVERAGE.get(symbol, 1.0)
-        actual_platform_leverage = 50.0  # Pacifica's actual leverage
+        # Get leverage for this symbol (same as Lighter)
+        leverage = MANUAL_LEVERAGE.get(symbol, 1.0)
         
-        # Calculate what our position size should be to achieve our intended risk
-        # If we want 5x effective leverage but platform uses 50x, we need 1/10th the position size
-        leverage_adjustment_factor = configured_leverage / actual_platform_leverage
+        # Calculate notional value we can afford with this leverage (same as Lighter)
+        max_notional_value = risk_amount * leverage
         
-        # Calculate base notional value (what we want to risk)
-        target_notional = risk_amount * configured_leverage
+        # Calculate position size in units (same as Lighter)
+        position_size_units = max_notional_value / price
         
-        # Adjust position size for platform's actual leverage
-        adjusted_position_size = (risk_amount * leverage_adjustment_factor) / price
-        
-        # Cap position size to prevent excessive exposure
-        max_risk_amount = 0.8 * ACCOUNT_BALANCE
-        max_position_size = (max_risk_amount * leverage_adjustment_factor) / price
-        
-        if adjusted_position_size > max_position_size:
-            adjusted_position_size = max_position_size
+        # Cap position size to prevent excessive exposure (same as Lighter)
+        max_affordable_notional = ACCOUNT_BALANCE * 0.8  # Max 80% of account as notional
+        if position_size_units * price > max_affordable_notional:
+            position_size_units = max_affordable_notional / price
             self.logger.warning(f"Reduced position size for {symbol} due to risk limits")
         
-        # Calculate actual notional with platform leverage for logging
-        actual_notional = adjusted_position_size * price * actual_platform_leverage
-        
-        self.logger.info(f"LEVERAGE ADJUSTMENT: Configured {configured_leverage}x → Platform {actual_platform_leverage}x")
+        # Log the calculation details
         self.logger.info(f"Risk calculation: {risk_percent:.1f}% of ${ACCOUNT_BALANCE} = ${risk_amount:.2f} target risk")
-        self.logger.info(f"Position adjustment: ${target_notional:.2f} target notional → {adjusted_position_size:.6f} units (factor: {leverage_adjustment_factor:.3f})")
-        self.logger.info(f"Actual exposure: {adjusted_position_size:.6f} units × ${price:.2f} × {actual_platform_leverage}x = ${actual_notional:.2f}")
+        self.logger.info(f"Position adjustment: ${max_notional_value:.2f} target notional → {position_size_units:.6f} units (factor: {leverage:.1f})")
+        self.logger.info(f"Actual exposure: {position_size_units:.6f} units × ${price:.2f} × {leverage:.1f}x = ${position_size_units * price * leverage:.2f}")
         
-        return adjusted_position_size
+        return position_size_units
 
     def _generate_random_trade_params(self) -> Dict:
         """Generate random trading parameters"""
